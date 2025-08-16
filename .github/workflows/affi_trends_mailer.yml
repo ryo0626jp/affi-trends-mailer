@@ -1,0 +1,64 @@
+name: AffiTrends mailer
+
+on:
+  schedule:
+    - cron: '0 */3 * * *'   # 3時間ごと（UTC）→ JSTの 0/3/6/9/12/15/18/21 時
+  workflow_dispatch:        # 手動実行ボタン
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - run: pip install -r requirements.txt
+
+      # Secrets から config.json を生成（app.py はこれを読む）
+      - name: Build config.json
+        run: |
+          python - << 'PY'
+          import os, json
+          cfg = {
+            "RAKUTEN_APPLICATION_ID": os.environ["RAKUTEN_APPLICATION_ID"],
+            "RAKUTEN_AFFILIATE_ID":  os.environ["RAKUTEN_AFFILIATE_ID"],
+            "AMAZON_ASSOCIATE_TAG":  os.environ.get("AMAZON_ASSOCIATE_TAG",""),
+            "EMAIL": {
+              "SMTP_HOST": os.environ["SMTP_HOST"],
+              "SMTP_PORT": int(os.environ["SMTP_PORT"]),
+              "SMTP_USER": os.environ["SMTP_USER"],
+              "SMTP_PASSWORD": os.environ["SMTP_PASSWORD"],
+              "FROM": os.environ["MAIL_FROM"],
+              "TO": [x.strip() for x in os.environ["MAIL_TO_CSV"].split(",") if x.strip()],
+              "SUBJECT": "トレンド商品レポート（{date} {time}）"
+            }
+          }
+          open("config.json","w",encoding="utf-8").write(json.dumps(cfg, ensure_ascii=False))
+          PY
+        env:
+          RAKUTEN_APPLICATION_ID: ${{ secrets.RAKUTEN_APPLICATION_ID }}
+          RAKUTEN_AFFILIATE_ID:  ${{ secrets.RAKUTEN_AFFILIATE_ID }}
+          AMAZON_ASSOCIATE_TAG:  ${{ secrets.AMAZON_ASSOCIATE_TAG }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO_CSV: ${{ secrets.MAIL_TO_CSV }}
+
+      # （任意）NO_FILTER=1 で“商品っぽさフィルタ”無効にしたい場合は以下を有効化
+      # - run: echo "NO_FILTER=1" >> $GITHUB_ENV
+
+      - run: python app.py
+
+      # 成果物の確認用にExcelとログをアーティファクト保存（任意）
+      - uses: actions/upload-artifact@v4
+        with:
+          name: outputs
+          path: |
+            trending_affiliates.xlsx
+            run.log
